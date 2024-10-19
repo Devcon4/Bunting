@@ -24,6 +24,6 @@ fn main(input: FragmentInput) -> GBufferOutput {
   output.emissive = textureSample(emissiveTexture, mainSampler, input.uv);
   output.metalicRoughnessAO = textureSample(metalicRoughnessAOTexture, mainSampler, input.uv);
 
-  output.albedo = vec4<f32>(input.normal, 1.0);
+  output.albedo = vec4<f32>(input.uv, 0, 1.0);
   return output;
 }
