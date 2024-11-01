@@ -1,34 +1,11 @@
-import { mat4 } from 'gl-matrix';
-import { CameraInveseView, CameraProjection, GetCamera } from '../camera';
+import { CameraInverseView, CameraProjection, GetCamera } from '../camera';
 import { EngineData } from '../engine';
 import { Err, Ok, Result } from '../errorHandling';
 import { Model, ModelNode } from '../model';
 import { Pipeline } from '../Pipeline';
 import { MultiplyTransforms, Transform, TransformMatrix } from '../transform';
-
-type GBufferImage = {
-	view: GPUTextureView;
-	texture: GPUTexture;
-};
-
-export const GeometryData: {
-	pipeline: GPURenderPipeline;
-	uboGroup: GPUBindGroup;
-	gbufferGroup: GPUBindGroup;
-	sampler: GPUSampler;
-	depth: GBufferImage;
-	materialGroupLayout: GPUBindGroupLayout;
-	GBuffer: {
-		albedo: GBufferImage;
-		normal: GBufferImage;
-		emissive: GBufferImage;
-		metalicRoughnessAO: GBufferImage;
-	};
-	ubo: GPUBuffer;
-	models: Model[];
-} = {
-	models: [],
-} as any;
+import { Mat4 } from '../wgpu-matrix.extensions';
+import { GeometryData } from './GeometryData';
 
 Pipeline.RegisterResized({ name: 'Geometry Pipeline' })(
 	async (data: EngineData) => {
@@ -63,35 +40,36 @@ const CreateTextures = Result(async (data: EngineData) => {
 	const depthTexture = data.device.createTexture({
 		size,
 		label: 'Depth Texture',
-		format: 'depth24plus-stencil8',
+		format: 'depth24plus',
 		usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 	});
 
 	const GBufferAlbedo = data.device.createTexture({
 		size,
 		label: 'GBuffer Albedo',
-		format: 'rgba8unorm',
+		format: data.format,
 		usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 	});
+  
 
 	const GBufferNormal = data.device.createTexture({
 		size,
 		label: 'GBuffer Normal',
-		format: 'rgba8unorm',
+		format: data.format,
 		usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 	});
 
 	const GBufferEmissive = data.device.createTexture({
 		size,
 		label: 'GBuffer Emissive',
-		format: 'rgba8unorm',
+		format: data.format,
 		usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 	});
 
 	const GBufferMetalicRoughnessAO = data.device.createTexture({
 		size,
 		label: 'GBuffer MetalicRoughnessAO',
-		format: 'rgba8unorm',
+		format: data.format,
 		usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 	});
 
@@ -214,10 +192,10 @@ Pipeline.RegisterInit({ name: 'Geometry Pipeline', priority: 1000 })(
 				module: fragmentShaderModule,
 				entryPoint: 'main',
 				targets: [
-					{ format: 'rgba8unorm' }, // albedo
-					{ format: 'rgba8unorm' }, // normal
-					{ format: 'rgba8unorm' }, // emissive
-					{ format: 'rgba8unorm' }, // metalicRoughnessAO
+					{ format: data.format }, // albedo
+					{ format: data.format }, // normal
+					{ format: data.format }, // emissive
+					{ format: data.format }, // metalicRoughnessAO
 				],
 			},
 			primitive: {
@@ -228,7 +206,7 @@ Pipeline.RegisterInit({ name: 'Geometry Pipeline', priority: 1000 })(
 			depthStencil: {
 				depthWriteEnabled: true,
 				depthCompare: 'less',
-				format: 'depth24plus-stencil8',
+				format: 'depth24plus',
 			},
 			layout: pipelineLayout,
 		});
@@ -246,9 +224,11 @@ Pipeline.RegisterInit({ name: 'Geometry Pipeline', priority: 1000 })(
 
 		const uboBuffer = data.device.createBuffer({
 			label: 'Geometry UBO Buffer',
-			size: 3 * 16 * 4 + 4 * 4, // 3 matrices, 16 floats each + 1 vec4 color
+			size: 3 * 16 * 4, // 3 matrices, 16 floats each + 1 vec4 color
 			usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 		});
+
+		GeometryData.ubo = uboBuffer;
 
 		const uboGroup = data.device.createBindGroup({
 			label: 'Geometry UBO Bind Group',
@@ -257,13 +237,12 @@ Pipeline.RegisterInit({ name: 'Geometry Pipeline', priority: 1000 })(
 				{
 					binding: 0,
 					resource: {
-						buffer: uboBuffer,
+						buffer: GeometryData.ubo,
 					},
 				},
 			],
 		});
 
-		GeometryData.ubo = uboBuffer;
 		GeometryData.uboGroup = uboGroup;
 		GeometryData.materialGroupLayout = materialGroupLayout;
 		GeometryData.sampler = sampler;
@@ -293,7 +272,7 @@ Pipeline.RegisterRun({ name: 'Geometry Pipeline' })(
 			view,
 			storeOp: 'store',
 			loadOp: 'clear',
-			clearValue: { r: 0, g: 0, b: 0, a: 0 },
+			clearValue: { r: 0, g: 0, b: 0, a: 1.0 },
 		});
 
 		const renderPassDescriptor: GPURenderPassDescriptor = {
@@ -304,13 +283,13 @@ Pipeline.RegisterRun({ name: 'Geometry Pipeline' })(
 				createAttachment(GeometryData.GBuffer.metalicRoughnessAO.view),
 			],
 			depthStencilAttachment: {
-				view: GeometryData.depth.texture.createView(),
+				view: GeometryData.depth.view,
 				depthLoadOp: 'clear',
 				depthClearValue: 1.0,
 				depthStoreOp: 'store',
-				stencilLoadOp: 'clear',
-				stencilClearValue: 0,
-				stencilStoreOp: 'store',
+				// stencilLoadOp: 'clear',
+				// stencilClearValue: 0,
+				// stencilStoreOp: 'store',
 			},
 		};
 
@@ -331,38 +310,39 @@ Pipeline.RegisterRun({ name: 'Geometry Pipeline' })(
 			data.canvasSize.width,
 			data.canvasSize.height
 		);
+    const cameraRes = await GetCamera();
+    if (!cameraRes.Ok) {
+      return Err('Error getting current camera :: ', cameraRes.Error);
+    }
+
+    const view = CameraInverseView(cameraRes.Value);
+    const projection = CameraProjection(cameraRes.Value);
+
+    const setUbo = (modelMatrix: Mat4) => {
+      console.log('modelMatrix :: ', modelMatrix);
+      const uboData = new Float32Array(3 * 16); // 3 matrices, 16 floats each
+
+      uboData.set(view, 0);
+      uboData.set(projection, 16);
+      uboData.set(modelMatrix, 32);
+      data.device.queue.writeBuffer(GeometryData.ubo, 0, uboData);
+    };
 
 		const drawModel = Result(async (model: Model) => {
 			renderPass.setVertexBuffer(0, model.vertices);
 			renderPass.setIndexBuffer(model.indices, 'uint16');
-
-			const curr = await GetCamera();
-
-			if (!curr.Ok) {
-				return Err('Error getting current camera :: ', curr.Error);
-			}
-
-			const uboData = new Float32Array(3 * 16 + 4); // 3 matrices, 16 floats each + 1 vec4 color
-			const view = CameraInveseView(curr.Value);
-			const projection = CameraProjection(curr.Value);
-
-			uboData.set(view);
-			uboData.set(projection, 16);
-
-			const setUbo = (modelMatrix: mat4) => {
-				uboData.set(modelMatrix, 32);
-				uboData.set([1, 0, 0, 1], 48); // red color
-				data.device.queue.writeBuffer(GeometryData.ubo, 0, uboData);
-			};
+      // setUbo(mat4.identity());
 
 			const drawNode = (
 				root: Model,
 				parentTransform: Transform,
 				node: ModelNode
 			) => {
+        // console.log('node :: ', node.transform.translation);
+        // console.log('root :: ', root.transform.translation);
 				const absoluteTransform = MultiplyTransforms(
 					node.transform,
-					parentTransform
+					parentTransform,
 				);
 
 				for (let child of node.children) {
@@ -370,7 +350,14 @@ Pipeline.RegisterRun({ name: 'Geometry Pipeline' })(
 				}
 
 				const modelMatrix = TransformMatrix(absoluteTransform);
+        // console.log('modelMatrix :: ', modelMatrix);
+        // console.log('root :: ', TransformMatrix(root.transform));
+        // console.log('node :: ', TransformMatrix(node.transform));
+        // console.log('absoluteTransform :: ', absoluteTransform.rotation);
+
 				setUbo(modelMatrix);
+        // console.log('transform :: ', absoluteTransform);
+        // console.log('modelMatrix :: ', modelMatrix);
 
 				// set node transform group
 				for (let primitive of node.primitives) {

@@ -1,7 +1,7 @@
-import { mat4, vec2 } from 'gl-matrix';
 import { Err, Ok, Result } from './errorHandling';
 import { IdentityTransform, Transform } from './transform';
 import { uuid } from './uuid';
+import { Mat4, mat4, vec2, Vec2, vec3 } from './wgpu-matrix.extensions';
 
 const CameraData: {
 	cameras: Map<uuid, Camera>;
@@ -10,7 +10,7 @@ const CameraData: {
 	cameras: new Map<uuid, Camera>(),
 } as any;
 
-export const ResizeCameras = Result(async (viewport: vec2) => {
+export const ResizeCameras = Result(async (viewport: Vec2) => {
 	for (const camera of CameraData.cameras.values()) {
 		camera.Aspect = viewport[0] / viewport[1];
 		camera.viewport = viewport;
@@ -80,42 +80,43 @@ export type Camera = {
 	Near: number;
 	Far: number;
 	Aspect: number;
-	viewport: vec2;
+	viewport: Vec2;
 };
 
-export const CameraView = (camera: Camera): mat4 => {
-	const res = mat4.create();
-	mat4.invert(res, CameraInveseView(camera));
-	return res;
+export const CameraView = (camera: Camera): Mat4 => {
+
+  const eye = camera.transform.translation;
+  const forward = vec3.transformQuat(vec3.fromValues(0, 0, -1), camera.transform.rotation);
+  const up = vec3.transformQuat(vec3.fromValues(0, 1, 0), camera.transform.rotation);
+
+  // console.log('eye', eye);
+  // console.log('forward', forward);
+  // console.log('up', up);
+
+  const res = mat4.lookAt(eye, vec3.add(eye, forward), up);
+
+  // console.log('res', res);
+
+  return res;
 };
 
-export const CameraProjection = (camera: Camera): mat4 => {
+export const CameraProjection = (camera: Camera): Mat4 => {
 	const fov = (camera.Fov * Math.PI) / 180; // convert fov to radians
-	const res = mat4.create();
-	mat4.perspective(res, fov, camera.Aspect, camera.Near, camera.Far);
-
-	return res;
+  return mat4.perspective(fov, camera.Aspect, camera.Near, camera.Far);
 };
 
-export const CameraInveseView = (camera: Camera): mat4 => {
-	const res = mat4.create();
-	mat4.fromRotationTranslationScale(
-		res,
-		camera.transform.rotation,
-		camera.transform.translation,
-		camera.transform.scale
-	);
-	return res;
+export const CameraInverseView = (camera: Camera): Mat4 => {
+  return mat4.invert(CameraView(camera));
 };
 
-export const CameraInverseProjection = (camera: Camera): mat4 => {
-	return mat4.invert(mat4.create(), CameraProjection(camera));
+export const CameraInverseProjection = (camera: Camera): Mat4 => {
+  return mat4.invert(CameraProjection(camera));
 };
 
 export const DefaultCamera: Camera = {
 	cameraId: uuid(),
 	transform: IdentityTransform(),
-	Fov: 90,
+	Fov: 45,
 	Near: 0.1,
 	Far: 1000,
 	Aspect: 16 / 9,

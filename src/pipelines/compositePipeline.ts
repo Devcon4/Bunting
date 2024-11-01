@@ -1,18 +1,8 @@
 import { EngineData } from '../engine';
 import { Err, Ok, Result } from '../errorHandling';
 import { Pipeline } from '../Pipeline';
-import { GeometryData } from './geometryPipeline';
-
-export const CompositeData: {
-	pipeline: GPURenderPipeline;
-	gbufferGroup: GPUBindGroup;
-	gbufferGroupLayout: GPUBindGroupLayout;
-	sampler: GPUSampler;
-	final: {
-		image: GPUTexture;
-		view: GPUTextureView;
-	};
-} = {} as any;
+import { CompositeData } from './CompositeData';
+import { CubeData } from './CubeData';
 
 const createBindGroup = Result(async (data: EngineData) => {
 	const image = data.context.getCurrentTexture();
@@ -28,19 +18,19 @@ const createBindGroup = Result(async (data: EngineData) => {
 		addressModeW: 'repeat',
 	});
 
-	const depthOnlyView = GeometryData.depth.texture.createView({
-		aspect: 'depth-only',
-	});
+	// const depthOnlyView = GeometryData.depth.texture.createView({
+	// 	aspect: 'depth-only',
+	// });
 
 	const gbufferGroup = data.device.createBindGroup({
 		label: 'Composite GBuffer Bind Group',
 		layout: CompositeData.gbufferGroupLayout,
 		entries: [
-			{ binding: 0, resource: GeometryData.GBuffer.albedo.view },
-			{ binding: 1, resource: GeometryData.GBuffer.normal.view },
-			{ binding: 2, resource: GeometryData.GBuffer.emissive.view },
-			{ binding: 3, resource: GeometryData.GBuffer.metalicRoughnessAO.view },
-			{ binding: 4, resource: depthOnlyView },
+			{ binding: 0, resource: CubeData.GBuffer.albedo.view },
+			{ binding: 1, resource: CubeData.GBuffer.normal.view },
+			{ binding: 2, resource: CubeData.GBuffer.emissive.view },
+			{ binding: 3, resource: CubeData.GBuffer.metalicRoughnessAO.view },
+			{ binding: 4, resource: CubeData.depth.view },
 			{ binding: 5, resource: sampler },
 		],
 	});
@@ -181,6 +171,20 @@ Pipeline.RegisterRun({ name: 'Composite Pipeline', priority: 1024 })(
 		const renderPass = encoder.beginRenderPass(renderPassDescriptor);
 
 		renderPass.setPipeline(CompositeData.pipeline);
+    renderPass.setViewport(
+			0,
+			0,
+			data.canvasSize.width,
+			data.canvasSize.height,
+			0,
+			1
+		);
+		renderPass.setScissorRect(
+			0,
+			0,
+			data.canvasSize.width,
+			data.canvasSize.height
+		);
 		renderPass.setBindGroup(0, CompositeData.gbufferGroup);
 
 		renderPass.draw(6, 1, 0, 0);

@@ -1,16 +1,19 @@
 import {
-	Material,
-	Node,
-	NodeIO,
-	Texture,
-	TextureInfo,
+  Accessor,
+  Material,
+  Node,
+  NodeIO,
+  Texture,
+  TextureInfo,
+  TypedArray,
 } from '@gltf-transform/core';
-import { vec2, vec3, vec4 } from 'gl-matrix';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { EngineData } from './engine';
 import { Err, Ok, Result } from './errorHandling';
-import { GeometryData } from './pipelines/geometryPipeline';
+import { CubeData } from './pipelines/CubeData';
 import { IdentityTransform, Transform } from './transform';
 import { uuid } from './uuid';
+import { quat, vec2, Vec2, vec3, Vec3, Vec4 } from './wgpu-matrix.extensions';
 
 export type BuntingImage = {
 	image: GPUTexture;
@@ -45,9 +48,9 @@ export type ModelNode = {
 };
 
 export type ModelVertex = {
-	position: vec3;
-	normal: vec3;
-	uv: vec2;
+	position: Vec3;
+	normal: Vec3;
+	uv: Vec2;
 };
 
 export type Model = {
@@ -67,17 +70,52 @@ const getLocalTransform = (node: Node): Transform => {
 	const scale = node.getScale();
 
 	return {
-		translation,
-		rotation,
-		scale,
+		translation: vec3.fromValues(translation[0], translation[1], translation[2]),
+    rotation: quat.fromValues(rotation[0], rotation[1], rotation[2], rotation[3]),
+		scale: vec3.fromValues(scale[0], scale[1], scale[2]),
 	};
 };
 
+const normalizeAccessor = (
+  accessor: Accessor | null,
+  targets: [number[], number[]] = [[0, 0], [1, 1]],
+  defaultValue: TypedArray = new Float32Array(0),
+  minMax: [number[], number[]] = [[0, 0], [1, 1]],
+): ((index: number) => number) => {
+  const array = accessor?.getArray() || defaultValue;
+  // console.log('accessor', array);
+  const [minDefault, maxDefault] = minMax;
+  const [targetMin, targetMax] = targets;
+
+  const min = accessor?.getMin(targetMin) || minDefault;
+  const max = accessor?.getMax(targetMax) || maxDefault;
+  // console.log('min', min);
+  // console.log('max', max);
+
+  return (index: number) => {
+    const mini = min[index % min.length];
+    const maxi = max[index % max.length];
+    const targetMini = targetMin[index % targetMin.length];
+    const targetMaxi = targetMax[index % targetMax.length];
+
+    const normalizedValue = (array[index] - mini) / (maxi - mini);
+    // const mappedValue = normalizedValue * (targetMax[index % targetMax.length] - targetMin[index % targetMin.length]) + targetMin[index % targetMin.length];
+    const mappedValue = normalizedValue * (targetMaxi - targetMini) + targetMini;
+    // return mappedValue;
+    return normalizedValue;
+    // return vec2.fromValues(array[offset], array[offset + 1]);
+  };
+};
+
 const LoadModel = Result(async (path: string) => {
-	const io = new NodeIO(window.fetch.bind(window));
-	io.setAllowNetwork(true);
-	io.setLogger(console);
+	const io = new NodeIO(window.fetch.bind(window))
+    .registerExtensions(ALL_EXTENSIONS)
+	  .setAllowNetwork(true)
+	  .setLogger(console)
 	const modelFile = await io.read(path);
+
+  // await modelFile.transform(normals());
+
 	const root = modelFile.getRoot();
 	const nodes = root.listNodes();
 	const rawMats = root.listMaterials();
@@ -86,11 +124,11 @@ const LoadModel = Result(async (path: string) => {
 	const meshVertices: ModelVertex[] = [];
 	const meshIndices: number[] = [];
 
-	const emptyImage = Result(async (colorFactor?: vec4) => {
+	const emptyImage = Result(async (colorFactor?: Vec4) => {
 		const tex = EngineData.device.createTexture({
 			label: 'Empty Texture',
 			size: { width: 1, height: 1, depthOrArrayLayers: 1 },
-			format: 'rgba8unorm',
+			format: EngineData.format,
 			usage:
 				GPUTextureUsage.TEXTURE_BINDING |
 				GPUTextureUsage.RENDER_ATTACHMENT |
@@ -157,7 +195,7 @@ const LoadModel = Result(async (path: string) => {
 			const tex = EngineData.device.createTexture({
 				label: `Model Texture: ${texName}`,
 				size: { width, height, depthOrArrayLayers: 1 },
-				format: 'rgba8unorm',
+				format: EngineData.format,
 				usage:
 					GPUTextureUsage.TEXTURE_BINDING |
 					GPUTextureUsage.RENDER_ATTACHMENT |
@@ -203,7 +241,7 @@ const LoadModel = Result(async (path: string) => {
 		async (
 			textureInfo: TextureInfo | null,
 			texture: Texture | null,
-			colorFactor?: vec4
+			colorFactor?: Vec4
 		) => {
 			if (!textureInfo || !texture) {
 				return await emptyImage(colorFactor);
@@ -223,9 +261,9 @@ const LoadModel = Result(async (path: string) => {
 		};
 
 		for (const primitive of mesh?.listPrimitives() || []) {
-			console.log('semantics', primitive.listSemantics());
+			// console.log('semantics', primitive.listSemantics());
 			const posAccessor = primitive.getAttribute('POSITION');
-			const normAccessor = primitive.getAttribute('NORMAL');
+			const normAccessor = primitive.getAttribute('NORMAL')?.setNormalized(true);
 			const uvAccessor = primitive.getAttribute('TEXCOORD_0');
 			const indicesAccessor = primitive.getIndices();
 			const material = primitive.getMaterial();
@@ -241,13 +279,17 @@ const LoadModel = Result(async (path: string) => {
 			if (!normAccessor) {
 				return Err('NORMAL attribute not found.');
 			}
-			const vertices = posAccessor.getArray() as Float32Array;
 
-			const defaultUV = new Float32Array((vertices.length / 3) * 2);
+      const verticesCount = posAccessor.getCount();
+			// const vertices = normalizeAccessor(posAccessor, [[-1, -1, -1], [1, 1, 1]]);
+      const vertexData = posAccessor.getArray() as Float32Array;
+      const vertices = (index: number) => vertexData[index];
+  
+			const defaultUV = new Float32Array((verticesCount / 3) * 2);
 			if (!uvAccessor) {
 				for (let i = 0; i < vertices.length / 3; i++) {
-					const x = vertices[i * 3];
-					const y = vertices[i * 3 + 1];
+					const x = vertices(i * 3);
+          const y = vertices(i * 3 + 1);
 					defaultUV[i * 2] = (x + 1) / 2; // U coordinate
 					defaultUV[i * 2 + 1] = (y + 1) / 2; // V coordinate
 				}
@@ -257,29 +299,55 @@ const LoadModel = Result(async (path: string) => {
 				return Err('Material not found.');
 			}
 
-			const normals = normAccessor.getArray() as Float32Array;
-			const uvs = (uvAccessor?.getArray() as Float32Array) || defaultUV;
+			// const normals = normalizeAccessor(normAccessor, [[-1, -1, -1], [1, 1, 1]]);
+      const normalData = normAccessor.getArray() as Float32Array;
+      const normals = (index: number) => normalData[index];
+			const uvs = normalizeAccessor(uvAccessor, [[0,0], [1, 1]], defaultUV);
 			const indices = indicesAccessor.getArray() as Uint16Array;
 
-			for (let i = 0; i < vertices.length; i += 3) {
-				const position = vec3.fromValues(
-					vertices[i],
-					vertices[i + 1],
-					vertices[i + 2]
-				);
-				const normal = vec3.fromValues(
-					normals[i],
-					normals[i + 1],
-					normals[i + 2]
-				);
-				const uv = vec2.fromValues(uvs[(i / 3) * 2], uvs[(i / 3) * 2 + 1]);
+      const vertexCount = posAccessor.getArray()?.length || 0 / 3;
 
-				meshVertices.push({
-					position,
-					normal,
-					uv,
-				});
-			}
+      for (let i = 0; i < vertexCount; i++) {
+        // const position = vec3.fromValues(
+        //   vertices[i * 3],
+        //   vertices[i * 3 + 1],
+        //   vertices[i * 3 + 2]
+        // );
+
+        const offset = i * 3 ;
+
+        const position = vec3.fromValues(
+          vertices(offset),
+          vertices(offset + 1),
+          vertices(offset + 2)
+        );
+
+        // const normal = vec3.fromValues(
+        //   normals[offset],
+        //   normals[offset + 1],
+        //   normals[offset + 2]
+        // );
+
+        const normal = vec3.fromValues(
+          normals(offset),
+          normals(offset + 1),
+          normals(offset + 2)
+        );
+        
+
+        const uv = vec2.fromValues(uvs(i * 2), uvs(i * 2 + 1));
+        // const uv = vec2.fromValues(uvs(i * 2), uvs(i * 2 + 1));
+
+        meshVertices.push({
+          position,
+          normal,
+          uv
+        });
+      }
+
+      console.log('normals', normAccessor.getArray());
+
+      console.log('vertices', meshVertices);
 
 			for (let i = 0; i < indices.length; i++) {
 				meshIndices.push(indices[i]);
@@ -315,36 +383,64 @@ const LoadModel = Result(async (path: string) => {
 		childNodes.push(result.Value);
 	}
 
-	const vertexSize = 3 * 4 + 3 * 4 + 2 * 4;
+	const vertexSize = 12 + 12 + 8;
 	const vertexBuffer = EngineData.device.createBuffer({
 		label: 'Model Vertex Buffer',
 		size: meshVertices.length * vertexSize,
 		usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-		mappedAtCreation: true,
 	});
 
-	const vertexData = new Float32Array(meshVertices.length * 8); // 3 position, 3 normal, 2 uv floats
+	// const vertexData = new Float32Array(meshVertices.length * 8); // 3 position, 3 normal, 2 uv floats
 
-	for (let i = 0; i < meshVertices.length; i++) {
-		const v = meshVertices[i];
-		const offset = i * 8;
-		vertexData.set(v.position, offset);
-		vertexData.set(v.normal, offset + 3);
-		vertexData.set(v.uv, offset + 6);
-	}
+  const vertexBufferData = new Float32Array(meshVertices.length * 8);
 
-	new Float32Array(vertexBuffer.getMappedRange()).set(vertexData);
-	vertexBuffer.unmap();
+  meshVertices.forEach((v, i) => {
+    vertexBufferData.set([
+      ...v.position,
+      ...v.normal,
+      ...v.uv
+    ], i * 8);
+  });
+
+  console.log('vertexData', vertexBufferData);
+
+	// for (let i = 0; i < meshVertices.length; i++) {
+	// 	const v = meshVertices[i];
+	// 	const offset = (i * 8);
+
+  //   vertexData.set([
+  //     v.position[0],
+  //     v.position[1],
+  //     v.position[2],
+  //     v.normal[0],
+  //     v.normal[1],
+  //     v.normal[2],
+  //     v.uv[0],
+  //     v.uv[1]
+  //   ], offset);
+
+	// 	// vertexData.set(v.position, offset);
+	// 	// vertexData.set(v.normal, offset + 3);
+	// 	// vertexData.set(v.uv, offset + 6);
+	// }
+
+  EngineData.device.queue.writeBuffer(vertexBuffer, 0, vertexBufferData.buffer);
+
+	// new Float32Array(vertexBuffer.getMappedRange()).set(vertexData);
+	// vertexBuffer.unmap();
+
+  const indexData = new Uint16Array(meshIndices);
 
 	const indexBuffer = EngineData.device.createBuffer({
 		label: 'Model Index Buffer',
-		size: meshIndices.length * 2,
-		usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-		mappedAtCreation: true,
+		size: indexData.byteLength,
+		usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
 	});
 
-	new Uint16Array(indexBuffer.getMappedRange()).set(meshIndices);
-	indexBuffer.unmap();
+  EngineData.device.queue.writeBuffer(indexBuffer, 0, indexData.buffer);
+
+	// new Uint16Array(indexBuffer.getMappedRange()).set(meshIndices);
+	// indexBuffer.unmap();
 
 	// const textures = root.listTextures().map<ModelTexture>((t, i) => ({textureIndex: i}));
 	const loadMaterial = Result(async (material: Material) => {
@@ -364,10 +460,12 @@ const LoadModel = Result(async (path: string) => {
 			material.getEmissiveTexture(),
 			material.getEmissiveTextureInfo(),
 		];
+    const baseColorFactor = material.getBaseColorFactor();
+    const colorArr = new Float32Array(baseColorFactor || [0, 0, 0, 1]);
 		const albedoImage = await loadImageOrDefault(
 			albedoTexInfo,
 			albedoTex,
-			material.getBaseColorFactor()
+      colorArr
 		);
 		const normalImage = await loadImageOrDefault(normalTexInfo, normalTex);
 		const emissiveImage = await loadImageOrDefault(
@@ -399,13 +497,13 @@ const LoadModel = Result(async (path: string) => {
 		}
 
 		const materialGroup = EngineData.device.createBindGroup({
-			layout: GeometryData.materialGroupLayout,
+			layout: CubeData.materialGroupLayout,
 			entries: [
 				{ binding: 0, resource: albedoImage.Value.view },
 				{ binding: 1, resource: normalImage.Value.view },
-				{ binding: 2, resource: metallicRoughnessImage.Value.view },
-				{ binding: 3, resource: emissiveImage.Value.view },
-				{ binding: 4, resource: GeometryData.sampler },
+				{ binding: 2, resource: emissiveImage.Value.view },
+				{ binding: 3, resource: metallicRoughnessImage.Value.view },
+				{ binding: 4, resource: CubeData.sampler },
 			],
 		});
 
@@ -413,8 +511,8 @@ const LoadModel = Result(async (path: string) => {
 			name: material.getName() || 'Unnamed Material',
 			albedoImage: albedoImage.Value,
 			normalImage: normalImage.Value,
-			metallicRoughnessImage: metallicRoughnessImage.Value,
 			emissiveImage: emissiveImage?.Value,
+			metallicRoughnessImage: metallicRoughnessImage.Value,
 			materialGroup,
 		};
 

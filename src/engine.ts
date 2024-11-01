@@ -93,6 +93,9 @@ const engineStart = Result(async (data: EngineData) => {
 		if (!runRes.Ok) {
 			return Err('Engine run failed.', runRes.Error);
 		}
+    // setTimeout(() => {
+    //   requestAnimationFrame(loop);
+    // }, 1000 / 10);
 
 		requestAnimationFrame(loop);
 	};

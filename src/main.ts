@@ -6,7 +6,8 @@ import './modules/ecsModule';
 import './modules/renderModule';
 
 import './pipelines/compositePipeline';
-import './pipelines/geometryPipeline';
+// import './pipelines/geometryPipeline';
+import './pipelines/cubePipeline';
 
 import './systems/InitSystem';
 // import './pipelines/trianglePipeline';

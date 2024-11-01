@@ -23,7 +23,7 @@ fn main(input: FragmentInput) -> FragmentOutput {
   var metalicRoughnessAO = textureSample(metalicRoughnessAOTexture, mainSampler, input.uv);
   var depth = textureSample(depthTexture, mainSampler, input.uv);
 
-  output.color = normal;
+  output.color = albedo;
 
   // output.color = vec4<f32>(depth/2, depth/2, depth/2, 1.0);
 
