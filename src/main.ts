@@ -8,6 +8,7 @@ import './modules/renderModule';
 import './pipelines/compositePipeline';
 // import './pipelines/geometryPipeline';
 import './pipelines/cubePipeline';
+import './pipelines/LightingPipeline';
 
 import './systems/InitSystem';
 // import './pipelines/trianglePipeline';

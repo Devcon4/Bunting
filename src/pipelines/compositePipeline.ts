@@ -2,7 +2,7 @@ import { EngineData } from '../engine';
 import { Err, Ok, Result } from '../errorHandling';
 import { Pipeline } from '../Pipeline';
 import { CompositeData } from './CompositeData';
-import { CubeData } from './CubeData';
+import { LightingData } from './LightingData';
 
 const createBindGroup = Result(async (data: EngineData) => {
 	const image = data.context.getCurrentTexture();
@@ -22,20 +22,16 @@ const createBindGroup = Result(async (data: EngineData) => {
 	// 	aspect: 'depth-only',
 	// });
 
-	const gbufferGroup = data.device.createBindGroup({
-		label: 'Composite GBuffer Bind Group',
-		layout: CompositeData.gbufferGroupLayout,
+	const imageGroup = data.device.createBindGroup({
+		label: 'Composite Image Bind Group',
+		layout: CompositeData.imageGroupLayout,
 		entries: [
-			{ binding: 0, resource: CubeData.GBuffer.albedo.view },
-			{ binding: 1, resource: CubeData.GBuffer.normal.view },
-			{ binding: 2, resource: CubeData.GBuffer.emissive.view },
-			{ binding: 3, resource: CubeData.GBuffer.metalicRoughnessAO.view },
-			{ binding: 4, resource: CubeData.depth.view },
-			{ binding: 5, resource: sampler },
+			{ binding: 0, resource: LightingData.lightingFinal.view },
+			{ binding: 1, resource: sampler },
 		],
 	});
 
-	CompositeData.gbufferGroup = gbufferGroup;
+	CompositeData.imageGroup = imageGroup;
 	CompositeData.sampler = sampler;
 	CompositeData.final = {
 		image,
@@ -63,8 +59,8 @@ Pipeline.RegisterInit({ name: 'Composite Pipeline', priority: 4096 })(
 			),
 		});
 
-		const gbufferGroupLayout = data.device.createBindGroupLayout({
-			label: 'Composite GBuffer Bind Group Layout',
+		const imageGroupLayout = data.device.createBindGroupLayout({
+			label: 'Composite Image Bind Group Layout',
 			entries: [
 				{
 					binding: 0,
@@ -74,26 +70,6 @@ Pipeline.RegisterInit({ name: 'Composite Pipeline', priority: 4096 })(
 				{
 					binding: 1,
 					visibility: GPUShaderStage.FRAGMENT,
-					texture: { sampleType: 'float' },
-				},
-				{
-					binding: 2,
-					visibility: GPUShaderStage.FRAGMENT,
-					texture: { sampleType: 'float' },
-				},
-				{
-					binding: 3,
-					visibility: GPUShaderStage.FRAGMENT,
-					texture: { sampleType: 'float' },
-				},
-				{
-					binding: 4,
-					visibility: GPUShaderStage.FRAGMENT,
-					texture: { sampleType: 'depth' },
-				},
-				{
-					binding: 5,
-					visibility: GPUShaderStage.FRAGMENT,
 					sampler: { type: 'filtering' },
 				},
 			],
@@ -101,7 +77,7 @@ Pipeline.RegisterInit({ name: 'Composite Pipeline', priority: 4096 })(
 
 		const pipelineLayout = data.device.createPipelineLayout({
 			label: 'Composite Pipeline Layout',
-			bindGroupLayouts: [gbufferGroupLayout],
+			bindGroupLayouts: [imageGroupLayout],
 		});
 
 		const pipeline = await data.device.createRenderPipelineAsync({
@@ -122,7 +98,7 @@ Pipeline.RegisterInit({ name: 'Composite Pipeline', priority: 4096 })(
 		});
 
 		CompositeData.pipeline = pipeline;
-		CompositeData.gbufferGroupLayout = gbufferGroupLayout;
+		CompositeData.imageGroupLayout = imageGroupLayout;
 
 		const res = await createBindGroup(data);
 
@@ -185,7 +161,7 @@ Pipeline.RegisterRun({ name: 'Composite Pipeline', priority: 1024 })(
 			data.canvasSize.width,
 			data.canvasSize.height
 		);
-		renderPass.setBindGroup(0, CompositeData.gbufferGroup);
+		renderPass.setBindGroup(0, CompositeData.imageGroup);
 
 		renderPass.draw(6, 1, 0, 0);
 

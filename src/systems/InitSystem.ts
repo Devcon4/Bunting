@@ -1,6 +1,4 @@
 import {
-  CameraProjection,
-  CameraView,
   CreateCamera,
   GetCamera,
   UpdateCamera
@@ -8,6 +6,7 @@ import {
 import { Ecs } from '../Ecs';
 import { EngineData } from '../engine';
 import { Err, Ok, Result } from '../errorHandling';
+import { CreateLight } from '../light';
 import LoadModel from '../model';
 import { GeometryData } from '../pipelines/GeometryData';
 import { IdentityTransform } from '../transform';
@@ -28,11 +27,6 @@ Ecs.RegisterInit({ name: 'InitialSystem' })(
 		if (!camera.Ok) {
 			return Err('Error creating camera :: ', camera.Error);
 		}
-
-		const view = CameraView(camera.Value);
-		console.log('view', view);
-		const projection = CameraProjection(camera.Value);
-		console.log('projection', projection);
 
 		const helmetRes = await LoadModel(
 			'http://localhost:6010/models/damagedHelmet/DamagedHelmet.gltf'
@@ -64,6 +58,14 @@ Ecs.RegisterInit({ name: 'InitialSystem' })(
       rotation: quat.fromEulerDegree(180,0,0),
       translation: vec3.fromValues(0,0,0),
     };
+
+    const lightRes = await CreateLight(
+      {
+        ...IdentityTransform(),
+      },
+      [1, 0, 0, 1],
+      1,
+    )
 
     // quat.rotateX(helmet.transform.rotation, helmet.transform.rotation, 40 * Math.PI / 180);
 

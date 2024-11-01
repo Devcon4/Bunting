@@ -1,8 +1,8 @@
 
 export const CompositeData: {
   pipeline: GPURenderPipeline;
-  gbufferGroup: GPUBindGroup;
-  gbufferGroupLayout: GPUBindGroupLayout;
+  imageGroup: GPUBindGroup;
+  imageGroupLayout: GPUBindGroupLayout;
   sampler: GPUSampler;
   final: {
     image: GPUTexture;
